@@ -165,17 +165,26 @@ async function frame(): Promise<ReactNode> {
     clock: { now: async () => now },
     ui: { resolve: () => ({ Box, Text, Button }) },
   }
+  // What is left for the pane under the session lines and above the footer.
+  const bodyRows = Math.max(1, rows - lines.length - 1)
   const e = {
     surface: 'terminal',
-    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows: rows - lines.length - 1 }, view: null },
-    viewport: { rows: rows - lines.length - 1, columns },
+    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows }, view: null },
+    viewport: { rows: bodyRows, columns },
   }
   const tree = draw ? await draw($, e) : null
   hotkeys = hotkeysOf(tree)
+  // The pane draws at its own height (in Claude Code its body scrolls); a taller one is cut at the
+  // bottom here, since a frame taller than the window scrolls the session lines off its top. The
+  // inner box keeps that height: squeezed instead, the panels would draw over each other.
   return (
     <InkBox flexDirection="column">
       {lines}
-      {tree}
+      <InkBox flexDirection="column" flexShrink={0} maxHeight={bodyRows} overflow="hidden">
+        <InkBox flexDirection="column" flexShrink={0}>
+          {tree}
+        </InkBox>
+      </InkBox>
       {footer()}
     </InkBox>
   )
