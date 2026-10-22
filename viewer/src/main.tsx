@@ -77,6 +77,11 @@ let sessions: Session[] = []
 let hotkeys = new Map<string, () => unknown>()
 /** The session drawn last, so the window's own toggles reset when another takes its place. */
 let shownId: string | null = null
+/** Rows the pane is scrolled down by, and the most it can be: how much taller it is than its room. */
+let scrollTop = 0
+let maxScroll = 0
+/** The pane's room in rows, for a page of scrolling. */
+let pageRows = 1
 
 const tilde = (p: string) => (p.startsWith(homedir()) ? `~${p.slice(homedir().length)}` : p)
 
@@ -96,13 +101,15 @@ const STATUS: Record<Status['kind'], { glyph: string; label: string; color: stri
 const listed = () => (sessions.some(x => x.isLive) ? sessions.filter(x => x.isLive) : sessions)
 
 /** One line per live session (and the shown one, live or not), ▶ on the one drawn below, then a gap. */
-const strip = (shown: Session, now: number) => {
+const strip = (shown: Session, now: number, columns: number) => {
   const listed = sessions.filter(x => x.isLive || x === shown)
   // The name from `claude agents`, or the short id for a session it does not name.
   const labels = listed.map(x => nameOf(x.id) ?? x.id.slice(0, 8))
   const folders = listed.map(x => tilde(x.snap.cwd))
-  const lw = Math.min(24, Math.max(...labels.map(n => n.length)))
-  const fw = Math.min(28, Math.max(...folders.map(n => n.length)))
+  // Status and ctx keep their width (with the gaps, 30 cells); the folder gives way first, then the name.
+  const room = columns - 1 - 30
+  const lw = Math.max(8, Math.min(24, Math.max(...labels.map(n => n.length)), room - 8))
+  const fw = Math.max(0, Math.min(28, Math.max(...folders.map(n => n.length)), room - lw))
   return listed.map((x, i) => {
     const isShown = x === shown
     const st = x.isLive ? STATUS[x.status.kind] : { glyph: '○', label: `ended ${ago(now - x.snap.updatedAt)} ago`, color: 'gray' }
@@ -127,6 +134,7 @@ const footer = () => {
   const parts = [
     digits.length > 1 ? `${digits[0]}-${digits[digits.length - 1]} agent` : digits.length === 1 ? '1 agent' : null,
     gate.length > 0 ? `${gate.join(' ')} gate` : null,
+    maxScroll > 0 ? '↑↓ scroll' : null,
     listed().length > 1 ? 'tab ⇧tab session' : null,
     pinned ? 'a follow latest' : null,
     'q quit',
@@ -150,8 +158,9 @@ async function frame(): Promise<ReactNode> {
   if (s.id !== shownId) {
     for (const k of Object.keys(local)) delete local[k]
     shownId = s.id
+    scrollTop = 0
   }
-  const lines = strip(s, now)
+  const lines = strip(s, now, columns)
   loadDraw(s.snap.options)
   const snap: Snapshot = s.snap
   const $: ViewerState & Record<string, unknown> = {
@@ -174,14 +183,19 @@ async function frame(): Promise<ReactNode> {
   }
   const tree = draw ? await draw($, e) : null
   hotkeys = hotkeysOf(tree)
-  // The pane draws at its own height (in Claude Code its body scrolls); a taller one is cut at the
-  // bottom here, since a frame taller than the window scrolls the session lines off its top. The
-  // inner box keeps that height: squeezed instead, the panels would draw over each other.
+  // The pane draws at its own height, and in Claude Code its body scrolls. Here it scrolls too, with
+  // the arrow keys, inside the rows the session lines and the footer leave: a frame taller than the
+  // window would scroll the session lines off its top. The inner box keeps the pane's height, since
+  // squeezed the panels would draw over each other; drawing it once more measures that height.
+  const height = tree ? renderToString(<InkBox flexDirection="column">{tree}</InkBox>, { columns }).split('\n').length : 0
+  pageRows = bodyRows
+  maxScroll = Math.max(0, height - bodyRows)
+  scrollTop = Math.min(scrollTop, maxScroll)
   return (
     <InkBox flexDirection="column">
       {lines}
       <InkBox flexDirection="column" flexShrink={0} maxHeight={bodyRows} overflow="hidden">
-        <InkBox flexDirection="column" flexShrink={0}>
+        <InkBox flexDirection="column" flexShrink={0} marginTop={-scrollTop}>
           {tree}
         </InkBox>
       </InkBox>
@@ -204,6 +218,11 @@ const onKey = (input: string, key: Key) => {
   }
   if (input === 'a') {
     pinned = null
+    return void refresh()
+  }
+  const step = key.upArrow ? -1 : key.downArrow ? 1 : key.pageUp ? -pageRows : key.pageDown ? pageRows : key.home ? -maxScroll : key.end ? maxScroll : 0
+  if (step !== 0) {
+    scrollTop = Math.max(0, Math.min(maxScroll, scrollTop + step))
     return void refresh()
   }
   hotkeys.get(input)?.()
