@@ -19,13 +19,3 @@ export const DIMMED = new Set(['subtle'])
 
 /** A colour as Ink takes it: a theme name mapped, anything else (a hex from `pastel`) as given. */
 export const paint = (c: string | undefined) => (c !== undefined && c in THEME ? THEME[c] : c)
-
-/**
- * Glyphs swapped for ones every terminal draws exactly one cell wide: the gauges' ▰▱ and the effort
- * bar's ▮▯ come from fonts that may draw them wider, running into their neighbours. Block
- * elements are drawn by the terminal itself.
- */
-const GLYPHS: Record<string, string> = { '▰': '█', '▱': '░', '▮': '█', '▯': '░' }
-const GLYPH = new RegExp(`[${Object.keys(GLYPHS).join('')}]`, 'g')
-
-export const glyphs = (s: string) => s.replace(GLYPH, g => GLYPHS[g] ?? g)

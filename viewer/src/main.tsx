@@ -13,7 +13,7 @@ import { register } from '../../hooks/register'
 import type { ViewerState } from './claude-code-shim'
 import { DIR, listSessions } from './sessions'
 import type { Session, Snapshot } from './sessions'
-import { DIMMED, glyphs, paint } from './theme'
+import { DIMMED, paint } from './theme'
 
 declare global {
   // The JSX factory the mod's drawing compiles against.
@@ -25,10 +25,8 @@ globalThis.h = React.createElement
 
 type Props = Record<string, unknown> & { children?: ReactNode }
 
-const Text = ({ color, dimColor, children, ...p }: Props) => (
-  <InkText {...p} color={paint(color as string | undefined)} dimColor={Boolean(dimColor) || DIMMED.has(color as string)}>
-    {React.Children.map(children, c => (typeof c === 'string' ? glyphs(c) : c))}
-  </InkText>
+const Text = ({ color, dimColor, ...p }: Props) => (
+  <InkText {...p} color={paint(color as string | undefined)} dimColor={Boolean(dimColor) || DIMMED.has(color as string)} />
 )
 
 const Box = ({ borderColor, ...p }: Props) => <InkBox {...p} borderColor={paint(borderColor as string | undefined)} />

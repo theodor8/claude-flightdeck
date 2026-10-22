@@ -54,9 +54,17 @@ here (connectors are drawn still, clocks redraw once a second).
 
 ## How the viewer's drawing differs from the pane
 
-- **Gauges.** The gauges' `▰▱` and the effort bar's `▮▯` are drawn as `█░`. Many monospace fonts lack them (JetBrains
-  Mono, Ghostty's default, does), and the fallback fonts that have them (Hack Nerd Font, Menlo) fill the whole cell, so
-  the segments run together and into the percentage. The swap is `GLYPHS` in `viewer/src/theme.ts`.
+- **Gauges** (`▰▱`, effort `▮▯`) are drawn as upstream draws them; how they look is up to the terminal's font. Many
+  monospace fonts lack them (JetBrains Mono does), and fallbacks such as Hack Nerd Font and Menlo fill the whole cell,
+  so the segments run together and into the percentage. In Ghostty, list a backup font whose glyphs fit, after the
+  main font (installed, so Ghostty finds it by name):
+
+  ```
+  font-family = JetBrains Mono
+  font-family = Arial Unicode MS
+  ```
+
+  `ghostty +show-face --string='▰▱▮▯◐↻'` shows which font draws each one.
 - **Connectors and clocks** are drawn still and redraw once a second (the pane's animated rails need Claude Code).
 - **Hotkeys** are plain keys in the window, not `ctrl+x tab` focus.
 - **Top row.** Ink enters the alternate screen without homing the cursor; the viewer homes it so the frame starts on
