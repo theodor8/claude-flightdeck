@@ -26,7 +26,7 @@ let last: Snapshot | null = null
 const ended = new Map<string, number>()
 
 /** Tools that wait on the person while they run: a question to answer, a plan to approve. */
-const PERSON_TOOLS = ['AskUserQuestion', 'ExitPlanMode'] as const
+export const PERSON_TOOLS = ['AskUserQuestion', 'ExitPlanMode'] as const
 /**
  * Every reason a session ends. Flightdeck hooks `session.end` and `tool.call` too, and a module may
  * hook an event twice only with a matcher; a reason missing here falls back to the stale heartbeat.

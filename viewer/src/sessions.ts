@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { HEARTBEAT_MS, SNAPSHOT_DIR } from '../../hooks/bridge'
+import { HEARTBEAT_MS, PERSON_TOOLS, SNAPSHOT_DIR } from '../../hooks/bridge'
 import type { Waiting } from '../../hooks/bridge'
 import type { AgentCard, Check, Main, Receipt, Turn, Usage } from '../../types'
 
@@ -53,11 +53,20 @@ export type Session = {
  */
 const NEEDS_YOU_AFTER_MS = 5000
 
+/**
+ * A question or a plan is in the snapshot's `waiting`, from its call's start to its return. The gate
+ * records those calls as asks too, but does not always settle them, and an unsettled one would read
+ * as waiting long after it was answered.
+ */
+const isPersonTool = (tool: string) => (PERSON_TOOLS as readonly string[]).includes(tool)
+
 const statusOf = (s: Snapshot, now: number): Status => {
   const main = (s.state.main ?? {}) as Partial<Main>
   const turn = (s.state.turn ?? {}) as Partial<Turn>
   const receipt = s.state.receipt as Receipt | null | undefined
-  const recent = ((s.state.gate as { recent?: Check[] } | undefined)?.recent ?? []).filter(c => c.verdict === 'ask')
+  const recent = ((s.state.gate as { recent?: Check[] } | undefined)?.recent ?? []).filter(
+    c => c.verdict === 'ask' && !isPersonTool(c.tool),
+  )
   const pending = recent[recent.length - 1]
   if (s.waiting) return { kind: 'needs-you', detail: s.waiting.detail, since: s.waiting.since }
   if (pending && now - pending.at >= NEEDS_YOU_AFTER_MS) return { kind: 'needs-you', detail: pending.detail, since: pending.at }
