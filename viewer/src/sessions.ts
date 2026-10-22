@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { HEARTBEAT_MS, SNAPSHOT_DIR } from '../../hooks/bridge'
+import type { Waiting } from '../../hooks/bridge'
 import type { AgentCard, Check, Main, Receipt, Turn, Usage } from '../../types'
 
 export const DIR = join(homedir(), SNAPSHOT_DIR)
@@ -20,12 +21,17 @@ export type Snapshot = {
   /** Prompts sent in the session; absent from snapshots written before it was kept. */
   turns?: number
   updatedAt: number
+  /** When the session ended; absent from snapshots written before it was kept. */
+  endedAt?: number | null
+  /** A question or plan waiting on the person; absent from snapshots written before it was kept. */
+  waiting?: Waiting | null
   options: Record<string, unknown>
   state: Record<string, unknown>
 }
 
 /**
- * What a session is doing, for the strip: `needs-you` while a permission check waits on the person,
+ * What a session is doing, for the strip: `needs-you` while a question, a plan or a permission check
+ * waits on the person,
  * `working` while a turn runs, `done` once one has finished, `idle` before any.
  */
 export type Status = { kind: 'needs-you' | 'working' | 'done' | 'idle'; detail: string; since: number | null }
@@ -53,19 +59,31 @@ const statusOf = (s: Snapshot, now: number): Status => {
   const receipt = s.state.receipt as Receipt | null | undefined
   const recent = ((s.state.gate as { recent?: Check[] } | undefined)?.recent ?? []).filter(c => c.verdict === 'ask')
   const pending = recent[recent.length - 1]
+  if (s.waiting) return { kind: 'needs-you', detail: s.waiting.detail, since: s.waiting.since }
   if (pending && now - pending.at >= NEEDS_YOU_AFTER_MS) return { kind: 'needs-you', detail: pending.detail, since: pending.at }
   if (main.isRunning) return { kind: 'working', detail: '', since: turn.startedAt || null }
   if (receipt && turn.startedAt) return { kind: 'done', detail: '', since: turn.startedAt + receipt.durationMs }
   return { kind: 'idle', detail: '', since: null }
 }
 
-const parse = (file: string): Snapshot | null => {
+/** Each file's last whole read, by path: a file is parsed again only once it has changed. */
+const parsed = new Map<string, { mtimeMs: number; snap: Snapshot }>()
+
+/**
+ * The file's snapshot, or its last whole one while it is caught mid-write: a session that dropped
+ * out for a frame would take the window's toggles and scroll with it.
+ */
+const parse = (file: string, mtimeMs: number): Snapshot | null => {
+  const known = parsed.get(file)
+  if (known?.mtimeMs === mtimeMs) return known.snap
   try {
     const s = JSON.parse(readFileSync(file, 'utf8')) as Snapshot
-    return s && typeof s === 'object' && s.state ? s : null
+    if (!s || typeof s !== 'object' || !s.state) return known?.snap ?? null
+    parsed.set(file, { mtimeMs, snap: s })
+    return s
   } catch {
-    // A file caught mid-write: the next change event reads it whole.
-    return null
+    // The next change event reads it whole.
+    return known?.snap ?? null
   }
 }
 
@@ -83,13 +101,17 @@ export function listSessions(now: number): Session[] {
   for (const name of readdirSync(DIR)) {
     if (!name.endsWith('.json')) continue
     const file = join(DIR, name)
-    const age = now - statSync(file).mtimeMs
+    // Gone since the listing (another viewer removed it): skip it.
+    const mtimeMs = statSync(file, { throwIfNoEntry: false })?.mtimeMs
+    if (mtimeMs === undefined) continue
+    const age = now - mtimeMs
     if (age > KEEP_MS) {
       unlinkSync(file)
+      parsed.delete(file)
       continue
     }
     if (age > LIST_MS) continue
-    const snap = parse(file)
+    const snap = parse(file, mtimeMs)
     // Older bridges wrote pre-warmed spare sessions too; those files have no `turns`.
     if (!snap || (snap.turns ?? 0) === 0) continue
     const usage = (snap.state.usage ?? {}) as Partial<Usage>
@@ -97,7 +119,7 @@ export function listSessions(now: number): Session[] {
     out.push({
       id: snap.sessionId,
       snap,
-      isLive: now - snap.updatedAt < LIVE_MS,
+      isLive: !snap.endedAt && now - snap.updatedAt < LIVE_MS,
       activeAt: activityOf(snap),
       status: statusOf(snap, now),
       ctxPct: usage.pct ?? null,

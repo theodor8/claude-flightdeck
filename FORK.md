@@ -9,9 +9,10 @@ ANSI colours, so it follows the terminal theme.
 
 | Part | What it does |
 | --- | --- |
-| `hooks/bridge.ts` | Mirrors Flightdeck's session state to `~/.claude/flightdeck/sessions/<session>.json` on every change, and every 5s as a heartbeat. A session with no prompt yet (such as a pre-warmed `claude agents` spare) writes nothing. |
+| `hooks/bridge.ts` | Mirrors Flightdeck's session state to `~/.claude/flightdeck/sessions/<session>.json` on every change, and every 5s as a heartbeat, with the question or plan waiting on you, if any. A session that ends is rewritten as ended. A session with no prompt yet (such as a pre-warmed `claude agents` spare) writes nothing. |
 | `hooks/main.ts` | The hooks module: upstream's `register`, untouched, plus the bridge. `hooks/hooks.json` points here. |
 | `viewer/` | The `flightdeck` command: runs upstream's own Pane drawing from `hooks/register.tsx` against the snapshot and draws it with [Ink](https://github.com/vadimdemedes/ink). |
+| `tests/bridge.test.ts` | The bridge's tests, run with upstream's by `claude plugin test .`. |
 
 Upstream files are not edited (only `hooks/hooks.json`'s one line), so upstream updates merge cleanly and their panel
 changes show up in the viewer as they are.
@@ -38,14 +39,15 @@ Open a terminal window and run `flightdeck`. A session shows up after its first 
 
 The top lines list every live session that is not idle, one each: its name in `claude agents` (or its short id when it
 has none), folder, status, context and running agents; `▶` marks the one drawn below. Names are read with
-`claude agents --json` every 10s. Status is `◆ needs you` (a permission check has waited on you for 5s or more; the check is
-shown), `● working` or `✓ done 2m ago`. A session is `○ idle` when it has not finished a turn since its process started
+`claude agents --json` every 10s. Status is `◆ needs you` (a question or a plan to approve waits on you, or a permission check
+has for 5s or more; the question or check is shown), `● working` or `✓ done 2m ago`. A session is `○ idle` when it has not finished a turn since its process started
 (Claude Code restarts a background session's process when you attach or reply after it was stopped, and `/clear` or
 `/flightdeck reset` empties it too); it gets its line back with its next prompt, and is listed only while it is the one
 drawn or every live session is idle. The viewer follows the session that needs you, else the one you last used.
 
 A session is listed when its process runs the mod (started after the plugin was installed, or `/reload-plugins` since)
-and has had a prompt; it is live while its snapshot is fresh (rewritten every 5s). Finished `claude agents` sessions
+and has had a prompt; it is live until it ends (exits, or `/clear` starts another) or its snapshot goes stale (it is
+rewritten every 5s). Finished `claude agents` sessions
 have no process, so they are not listed until resumed. With several open:
 
 | Key | Does |
@@ -82,9 +84,15 @@ here (connectors are drawn still, clocks redraw once a second).
   `ghostty +show-face --string='▰▱▮▯◐↻'` shows which font draws each one.
 - **Layout** follows the window's width, not the `layout` option or `/flightdeck layout`. Under 110 columns the
   panels are one column, as upstream draws them. From 110 they sit side by side (main, architect and gate; agents,
-  loops and the last turn), each group drawn by upstream at its column's width, with the session log under them
-  filling the rows left. From 170 the log is a third column as tall as the window. The viewer draws the log itself
-  for this, in upstream's style, since upstream keeps it to 8 lines; the store holds the last 60.
+  loops and the last turn), each group drawn by upstream at its column's width. The session log goes under them,
+  filling the rows left, or from 170 columns is a third column as tall as the window. The viewer draws the log itself,
+  in upstream's style, since upstream keeps it to 8 lines (the store holds the last 60), and its name column only as
+  wide as the names in it, so the text gets the rest.
+- **Permission mode** is read from the session's transcript (`~/.claude/projects/…/<session>.jsonl`), which records
+  it on each prompt. Upstream learns it in a `UserPromptSubmit` hook, which Claude Code's bundled security plugin
+  (`cc-plugin-sec-default`) skips for installed plugins on a managed machine or a Team or Enterprise plan. Without
+  the mode, the gate counted the auto-mode classifier's decisions as `you`. A change of mode shows from the next
+  prompt.
 - **No title.** The `FLIGHTDECK · <MODEL>` line and its legend are left out; the session lines name the session.
 - **Scrolling.** Panels taller than the window scroll under the session lines, which stay put.
 - **Connectors and clocks** are drawn still and redraw once a second (the pane's animated rails need Claude Code).

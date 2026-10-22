@@ -16,6 +16,7 @@ import type { Panel } from '../../hooks/core'
 import { register } from '../../hooks/register'
 import type { LogLine } from '../../types'
 import type { ViewerState } from './claude-code-shim'
+import { modeOf } from './modes'
 import { NAMES_EVERY_MS, nameOf, readNames } from './names'
 import { DIR, listSessions } from './sessions'
 import type { Session, Snapshot, Status } from './sessions'
@@ -111,6 +112,8 @@ const heightOf = (node: ReactNode, width: number) => {
 const logPanel = (options: Record<string, unknown>, stored: unknown, width: number, rows: number) => {
   const C = PALETTES[parseConfig(options).palette]
   const shown = normalizeLog(stored).slice(-Math.max(1, rows - 3))
+  // The names (`you`, `main`, an agent's) take what the longest needs, up to the mod's 13 cells.
+  const whoW = Math.min(13, Math.max(4, ...shown.map(l => l.who.length)) + 2)
   const colorOf = (l: LogLine) =>
     l.kind === 'error' ? C.warn : l.kind === 'consult' ? C.arch : l.who === 'main' ? C.main : l.who === 'gate' ? C.gate : l.who === 'you' ? C.text : C.agent
   return (
@@ -122,7 +125,7 @@ const logPanel = (options: Record<string, unknown>, stored: unknown, width: numb
           <Box width={9} flexShrink={0}>
             <Text color={C.faint}>{fmtClock(l.at)}</Text>
           </Box>
-          <Box width={13} flexShrink={0}>
+          <Box width={whoW} flexShrink={0}>
             <Text color={colorOf(l)} bold wrap="truncate">
               {l.who}
             </Text>
@@ -191,7 +194,7 @@ const strip = (shown: Session, now: number, columns: number) => {
   const fw = Math.max(0, Math.min(28, Math.max(...folders.map(n => n.length)), room - lw))
   return listed.map((x, i) => {
     const isShown = x === shown
-    const st = x.isLive ? STATUS[x.status.kind] : { glyph: '○', label: `ended ${ago(now - x.snap.updatedAt)} ago`, color: 'gray' }
+    const st = x.isLive ? STATUS[x.status.kind] : { glyph: '○', label: `ended ${ago(now - (x.snap.endedAt ?? x.snap.updatedAt))} ago`, color: 'gray' }
     const when = x.isLive && x.status.kind === 'done' && x.status.since ? ` ${ago(now - x.status.since)} ago` : ''
     return (
       <InkText key={x.id} wrap="truncate">
@@ -242,12 +245,16 @@ async function frame(): Promise<ReactNode> {
   const lines = strip(s, now, columns)
   const snap: Snapshot = s.snap
   const cfg = parseConfig(snap.options)
+  const mode = modeOf(s.id, snap.cwd)
   const $: ViewerState & Record<string, unknown> = {
     state: {
-      // The window picks the layout from its width, so a layout set in the session does not apply.
       read: key => {
         const v = key in local ? local[key] : snap.state[key]
-        return key === 'view' && v && typeof v === 'object' ? { ...v, layout: null } : v
+        // The window picks the layout from its width, so a layout set in the session does not apply.
+        if (key === 'view' && v && typeof v === 'object') return { ...v, layout: null }
+        // The mode from the transcript, where the session's own hook for it may never run (modes.ts).
+        if (key === 'main' && mode && v && typeof v === 'object') return { ...v, mode }
+        return v
       },
       write: (key, value) => {
         local[key] = value
@@ -271,33 +278,32 @@ async function frame(): Promise<ReactNode> {
     return d ? withoutTitle(await d($, e)) : null
   }
   const hasLog = cfg.panels.includes('log')
-  let tree: ReactNode
-  if (W < SIDE_BY_SIDE_FROM) tree = await drawn(cfg.panels, W)
-  else {
-    // Side by side: the model and the gate, then the agents and the last turn, then the session log
-    // beside them when the window is wide enough for three, under them otherwise.
-    const isLogBeside = hasLog && W >= LOG_BESIDE_FROM
-    const colW = isLogBeside ? Math.min(MAX_COLUMN, Math.max(MIN_COLUMN, Math.floor((W - 2 * GAP) * 0.3))) : Math.floor((W - GAP) / 2)
-    const groups = await Promise.all([LEFT, MIDDLE].map(g => drawn(cfg.panels.filter(p => g.includes(p)), colW)))
-    const cols = groups.filter(c => heightOf(c, colW) > 0)
-    const colsH = Math.max(0, ...cols.map(c => heightOf(c, colW)))
-    const row = cols.map((c, i) => (
-      <InkBox key={i} flexDirection="column" width={colW} flexShrink={0}>
-        {c}
-      </InkBox>
-    ))
-    tree = isLogBeside ? (
-      <InkBox columnGap={GAP}>
-        {row}
-        {logPanel(snap.options, snap.state.log, W - cols.length * (colW + GAP), Math.max(bodyRows, colsH))}
-      </InkBox>
-    ) : (
-      <InkBox flexDirection="column">
-        <InkBox columnGap={GAP}>{row}</InkBox>
-        {hasLog ? <InkBox marginTop={1}>{logPanel(snap.options, snap.state.log, W, Math.max(5, bodyRows - colsH - 1))}</InkBox> : null}
-      </InkBox>
-    )
-  }
+  // One column of the mod's panels in a narrow window; side by side from 110 columns, the model and
+  // the gate, then the agents and the last turn. The session log, the viewer's own, goes under them,
+  // or beside them when the window is wide enough for three.
+  const isSideBySide = W >= SIDE_BY_SIDE_FROM
+  const isLogBeside = hasLog && W >= LOG_BESIDE_FROM
+  const colW = !isSideBySide ? W : isLogBeside ? Math.min(MAX_COLUMN, Math.max(MIN_COLUMN, Math.floor((W - 2 * GAP) * 0.3))) : Math.floor((W - GAP) / 2)
+  const sets = isSideBySide ? [LEFT, MIDDLE] : [cfg.panels]
+  const groups = await Promise.all(sets.map(g => drawn(cfg.panels.filter(p => p !== 'log' && g.includes(p)), colW)))
+  const cols = groups.filter(c => heightOf(c, colW) > 0)
+  const colsH = Math.max(0, ...cols.map(c => heightOf(c, colW)))
+  const row = cols.map((c, i) => (
+    <InkBox key={i} flexDirection="column" width={colW} flexShrink={0}>
+      {c}
+    </InkBox>
+  ))
+  const tree: ReactNode = isLogBeside ? (
+    <InkBox columnGap={GAP}>
+      {row}
+      {logPanel(snap.options, snap.state.log, W - cols.length * (colW + GAP), Math.max(bodyRows, colsH))}
+    </InkBox>
+  ) : (
+    <InkBox flexDirection="column">
+      <InkBox columnGap={GAP}>{row}</InkBox>
+      {hasLog ? <InkBox marginTop={cols.length > 0 ? 1 : 0}>{logPanel(snap.options, snap.state.log, W, Math.max(5, bodyRows - colsH - 1))}</InkBox> : null}
+    </InkBox>
+  )
   hotkeys = hotkeysOf(tree)
   // The pane draws at its own height, and in Claude Code its body scrolls. Here it scrolls too, with
   // the arrow keys, inside the rows the session lines and the footer leave: a frame taller than the
