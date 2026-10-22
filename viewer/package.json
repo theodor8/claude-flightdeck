@@ -1,0 +1,20 @@
+{
+  "name": "flightdeck-viewer",
+  "private": true,
+  "type": "module",
+  "description": "Flightdeck in a terminal window of its own: draws the mod's panels from the snapshot the bridge writes",
+  "bin": {
+    "flightdeck": "./bin/flightdeck.mjs"
+  },
+  "scripts": {
+    "build": "node bin/flightdeck.mjs --build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "ink": "^8.0.0",
+    "react": "^19.3.1"
+  }
+}
