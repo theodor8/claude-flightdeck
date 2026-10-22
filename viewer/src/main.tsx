@@ -10,7 +10,7 @@ import type { Key } from 'ink'
 import React from 'react'
 import type { ReactNode } from 'react'
 
-import { fmtUsd, shorten } from '../../hooks/core'
+import { shorten } from '../../hooks/core'
 import { register } from '../../hooks/register'
 import type { ViewerState } from './claude-code-shim'
 import { DIR, listSessions } from './sessions'
@@ -91,7 +91,7 @@ const STATUS: Record<Status['kind'], { glyph: string; label: string; color: stri
   idle: { glyph: '○', label: 'idle', color: 'gray' },
 }
 
-/** One line per live session (and the shown one, live or not): ▶ marks the one drawn below. */
+/** One line per live session (and the shown one, live or not), ▶ on the one drawn below, then a gap. */
 const strip = (shown: Session, now: number) => {
   const listed = sessions.filter(x => x.isLive || x === shown)
   const names = listed.map(x => tilde(x.snap.cwd))
@@ -106,12 +106,11 @@ const strip = (shown: Session, now: number) => {
         <InkText dimColor>{` ${x.id.slice(0, 4)}  `}</InkText>
         <InkText color={st.color} bold={x.status.kind === 'needs-you'}>{`${st.glyph} ${st.label}${when}`.padEnd(15)}</InkText>
         {x.ctxPct !== null ? <InkText dimColor>{`  ctx ${String(Math.round(x.ctxPct)).padStart(2)}%`}</InkText> : null}
-        {x.costUsd !== null ? <InkText dimColor>{`  ${fmtUsd(x.costUsd).padStart(6)}`}</InkText> : null}
         {x.agentsRunning > 0 ? <InkText color={paint('suggestion')}>{`  ${x.agentsRunning} agent${x.agentsRunning === 1 ? '' : 's'}`}</InkText> : null}
         {x.isLive && x.status.kind === 'needs-you' ? <InkText color="yellowBright">{`  ${x.status.detail}`}</InkText> : null}
       </InkText>
     )
-  })
+  }).concat(<InkText key="gap"> </InkText>)
 }
 
 /** The keys that do something in this frame: a key that would do nothing is not offered. */
@@ -121,7 +120,7 @@ const footer = () => {
   const parts = [
     digits.length > 1 ? `${digits[0]}-${digits[digits.length - 1]} agent` : digits.length === 1 ? '1 agent' : null,
     gate.length > 0 ? `${gate.join(' ')} gate` : null,
-    sessions.length > 1 ? 'tab session' : null,
+    sessions.length > 1 ? 'tab ⇧tab session' : null,
     pinned ? 'a follow latest' : null,
     'q quit',
   ]
@@ -180,8 +179,10 @@ async function frame(): Promise<ReactNode> {
 const onKey = (input: string, key: Key) => {
   if (input === 'q') return quit()
   if (key.tab && sessions.length > 0) {
-    const at = sessions.findIndex(x => x.id === (pinned ?? sessions[0]?.id))
-    pinned = sessions[(at + 1) % sessions.length]?.id ?? null
+    // tab goes down the list, shift+tab up.
+    const at = sessions.findIndex(x => x.id === (shownId ?? sessions[0]?.id))
+    const step = key.shift ? sessions.length - 1 : 1
+    pinned = sessions[(at + step) % sessions.length]?.id ?? null
     return void refresh()
   }
   if (input === 'a') {

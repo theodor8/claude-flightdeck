@@ -36,14 +36,18 @@ already running when the plugin was installed loads it the same way; it only see
 
 Open a terminal window and run `flightdeck`. A session shows up after its first prompt (a resumed one at once).
 
-The top lines list every live session, one each: folder, short id, status, context, cost and running agents; `▶`
-marks the one drawn below. Status is `◆ needs you` (a permission check has waited on you for 5s or more; the check is
+The top lines list every live session, one each: folder, short id, status, context and running agents; `▶` marks
+the one drawn below. Status is `◆ needs you` (a permission check has waited on you for 5s or more; the check is
 shown), `● working`, `✓ done 2m ago` or `○ idle`. The viewer follows the session that needs you, else the one you
-last used. With several open:
+last used.
+
+A session is listed when its process runs the mod (started after the plugin was installed, or `/reload-plugins` since)
+and has had a prompt; it is live while its snapshot is fresh (rewritten every 5s). Finished `claude agents` sessions
+have no process, so they are not listed until resumed. With several open:
 
 | Key | Does |
 | --- | --- |
-| `tab` | next session (pins it) |
+| `tab` / `shift+tab` | next / previous session (pins it) |
 | `a` | follow the most recently active session again |
 | `1`–`6` | expand an agent card or lane |
 | `f` `s` `o` | the gate's file / shell / other drill-down |

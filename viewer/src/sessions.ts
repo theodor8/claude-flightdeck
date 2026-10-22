@@ -37,7 +37,6 @@ export type Session = {
   activeAt: number
   status: Status
   ctxPct: number | null
-  costUsd: number | null
   agentsRunning: number
 }
 
@@ -102,7 +101,6 @@ export function listSessions(now: number): Session[] {
       activeAt: activityOf(snap),
       status: statusOf(snap, now),
       ctxPct: usage.pct ?? null,
-      costUsd: usage.costUsd ?? null,
       agentsRunning: agents.filter(a => a.status === 'running').length,
     })
   }
