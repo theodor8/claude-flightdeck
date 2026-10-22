@@ -1,6 +1,7 @@
 // Flightdeck in a terminal window of its own. It runs the mod's own `ui.render` hook from
-// `hooks/register.tsx`, unchanged, against the snapshot the bridge writes, and draws the tree it
-// answers with Ink. Upstream changes to the panels reach this window with no change here.
+// `hooks/register.tsx`, unchanged, against the snapshot the bridge writes, and draws the trees it
+// answers with Ink, side by side when the window is wide. Upstream changes to the panels reach this
+// window with no change here.
 import { appendFileSync, watch } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -10,8 +11,10 @@ import type { Key } from 'ink'
 import React from 'react'
 import type { ReactNode } from 'react'
 
-import { shorten } from '../../hooks/core'
+import { PALETTES, fmtClock, normalizeLog, parseConfig, shorten } from '../../hooks/core'
+import type { Panel } from '../../hooks/core'
 import { register } from '../../hooks/register'
+import type { LogLine } from '../../types'
 import type { ViewerState } from './claude-code-shim'
 import { NAMES_EVERY_MS, nameOf, readNames } from './names'
 import { DIR, listSessions } from './sessions'
@@ -47,24 +50,90 @@ const hotkeysOf = (node: ReactNode, out = new Map<string, () => unknown>()) => {
   return out
 }
 
+/** The pane without its title and legend, the centred rows at its top: the session lines name it here. */
+const withoutTitle = (tree: ReactNode) => {
+  if (!React.isValidElement<Props>(tree)) return tree
+  const rest = React.Children.toArray(tree.props.children).filter(
+    n => !(React.isValidElement<Props>(n) && n.type === Box && n.props.justifyContent === 'center'),
+  )
+  return React.cloneElement(tree, undefined, ...rest)
+}
+
 // ---------------------------------------------------------------- the mod's draw hook
 
 type Draw = ($: unknown, e: unknown) => Promise<ReactNode>
 
-let draw: Draw | null = null
-let drawnFor = ''
+const draws = new Map<string, Draw>()
 
-/** Runs the mod's `register` with the session's options, keeping only its Pane draw hook. */
-const loadDraw = (options: Record<string, unknown>) => {
+/** Runs the mod's `register` once per set of options, keeping only its Pane draw hook. */
+const drawFor = (options: Record<string, unknown>): Draw | null => {
   const key = JSON.stringify(options)
-  if (draw && key === drawnFor) return
+  const found: { draw?: Draw } = { draw: draws.get(key) }
+  if (found.draw) return found.draw
   const on = (event: string, a: unknown, b?: unknown) => {
     const matcher = typeof a === 'function' ? null : (a as Record<string, unknown>)
-    if (event === 'ui.render' && matcher?.component === 'Pane') draw = (typeof a === 'function' ? a : b) as Draw
+    if (event === 'ui.render' && matcher?.component === 'Pane') found.draw = (typeof a === 'function' ? a : b) as Draw
     return { catch: () => undefined }
   }
   register(on as never, options)
-  drawnFor = key
+  if (found.draw) draws.set(key, found.draw)
+  return found.draw ?? null
+}
+
+// ---------------------------------------------------------------- the layout of this window
+
+/** Under this width the pane is one column as the mod draws it; from it, its panels sit side by side. */
+const SIDE_BY_SIDE_FROM = 110
+/** From this width the session log is a column of its own, as tall as the window. */
+const LOG_BESIDE_FROM = 170
+/**
+ * A column of panels beside the log takes about a third of the window, from 56 cells (where the main
+ * box still fits both usage limits with their resets) to 72 (wider, its boxes are mostly empty); the
+ * log, whose lines are long, takes the rest.
+ */
+const MIN_COLUMN = 56
+const MAX_COLUMN = 72
+const GAP = 2
+/** The panels of each column, in the order the session's `panels` option gives them. */
+const LEFT: readonly Panel[] = ['main', 'architect', 'gate']
+const MIDDLE: readonly Panel[] = ['agents', 'loops', 'receipt']
+
+/** Rows a tree takes at `width`, or 0 when it draws nothing (a column whose panels are all empty). */
+const heightOf = (node: ReactNode, width: number) => {
+  const out = node ? renderToString(<InkBox flexDirection="column">{node}</InkBox>, { columns: width }) : ''
+  return out.trim() === '' ? 0 : out.split('\n').length
+}
+
+/**
+ * The session log as the mod draws it, but `rows` tall: the mod keeps it to 8 lines under the other
+ * panels, and here it fills the window. The store keeps the last 60 lines.
+ */
+const logPanel = (options: Record<string, unknown>, stored: unknown, width: number, rows: number) => {
+  const C = PALETTES[parseConfig(options).palette]
+  const shown = normalizeLog(stored).slice(-Math.max(1, rows - 3))
+  const colorOf = (l: LogLine) =>
+    l.kind === 'error' ? C.warn : l.kind === 'consult' ? C.arch : l.who === 'main' ? C.main : l.who === 'gate' ? C.gate : l.who === 'you' ? C.text : C.agent
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={C.faint} paddingX={1} width={width} height={rows} flexShrink={0}>
+      <Text dimColor>session log</Text>
+      {shown.length === 0 ? <Text color={C.faint}>nothing yet</Text> : null}
+      {shown.map((l, i) => (
+        <Box key={i}>
+          <Box width={9} flexShrink={0}>
+            <Text color={C.faint}>{fmtClock(l.at)}</Text>
+          </Box>
+          <Box width={13} flexShrink={0}>
+            <Text color={colorOf(l)} bold wrap="truncate">
+              {l.who}
+            </Text>
+          </Box>
+          <Text color={l.kind === 'error' ? C.warn : C.text} wrap="truncate">
+            {l.text}
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  )
 }
 
 // ---------------------------------------------------------------- state of this window
@@ -161,11 +230,15 @@ async function frame(): Promise<ReactNode> {
     scrollTop = 0
   }
   const lines = strip(s, now, columns)
-  loadDraw(s.snap.options)
   const snap: Snapshot = s.snap
+  const cfg = parseConfig(snap.options)
   const $: ViewerState & Record<string, unknown> = {
     state: {
-      read: key => (key in local ? local[key] : snap.state[key]),
+      // The window picks the layout from its width, so a layout set in the session does not apply.
+      read: key => {
+        const v = key in local ? local[key] : snap.state[key]
+        return key === 'view' && v && typeof v === 'object' ? { ...v, layout: null } : v
+      },
       write: (key, value) => {
         local[key] = value
         void refresh()
@@ -176,18 +249,51 @@ async function frame(): Promise<ReactNode> {
   }
   // What is left for the pane under the session lines and above the footer.
   const bodyRows = Math.max(1, rows - lines.length - 1)
-  const e = {
-    surface: 'terminal',
-    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows }, view: null },
-    viewport: { rows: bodyRows, columns },
+  const W = columns - 1
+  /** The mod's own drawing of just these panels, one column `width` wide. */
+  const drawn = async (panels: Panel[], width: number) => {
+    const d = panels.length > 0 ? drawFor({ ...snap.options, panels: panels.join(','), layout: 'compact' }) : null
+    const e = {
+      surface: 'terminal',
+      props: { bodyColumns: width, placement: 'docked', scroll: { bodyRows }, view: null },
+      viewport: { rows: bodyRows, columns: width },
+    }
+    return d ? withoutTitle(await d($, e)) : null
   }
-  const tree = draw ? await draw($, e) : null
+  const hasLog = cfg.panels.includes('log')
+  let tree: ReactNode
+  if (W < SIDE_BY_SIDE_FROM) tree = await drawn(cfg.panels, W)
+  else {
+    // Side by side: the model and the gate, then the agents and the last turn, then the session log
+    // beside them when the window is wide enough for three, under them otherwise.
+    const isLogBeside = hasLog && W >= LOG_BESIDE_FROM
+    const colW = isLogBeside ? Math.min(MAX_COLUMN, Math.max(MIN_COLUMN, Math.floor((W - 2 * GAP) * 0.3))) : Math.floor((W - GAP) / 2)
+    const groups = await Promise.all([LEFT, MIDDLE].map(g => drawn(cfg.panels.filter(p => g.includes(p)), colW)))
+    const cols = groups.filter(c => heightOf(c, colW) > 0)
+    const colsH = Math.max(0, ...cols.map(c => heightOf(c, colW)))
+    const row = cols.map((c, i) => (
+      <InkBox key={i} flexDirection="column" width={colW} flexShrink={0}>
+        {c}
+      </InkBox>
+    ))
+    tree = isLogBeside ? (
+      <InkBox columnGap={GAP}>
+        {row}
+        {logPanel(snap.options, snap.state.log, W - cols.length * (colW + GAP), Math.max(bodyRows, colsH))}
+      </InkBox>
+    ) : (
+      <InkBox flexDirection="column">
+        <InkBox columnGap={GAP}>{row}</InkBox>
+        {hasLog ? <InkBox marginTop={1}>{logPanel(snap.options, snap.state.log, W, Math.max(5, bodyRows - colsH - 1))}</InkBox> : null}
+      </InkBox>
+    )
+  }
   hotkeys = hotkeysOf(tree)
   // The pane draws at its own height, and in Claude Code its body scrolls. Here it scrolls too, with
   // the arrow keys, inside the rows the session lines and the footer leave: a frame taller than the
   // window would scroll the session lines off its top. The inner box keeps the pane's height, since
   // squeezed the panels would draw over each other; drawing it once more measures that height.
-  const height = tree ? renderToString(<InkBox flexDirection="column">{tree}</InkBox>, { columns }).split('\n').length : 0
+  const height = heightOf(tree, columns)
   pageRows = bodyRows
   maxScroll = Math.max(0, height - bodyRows)
   scrollTop = Math.min(scrollTop, maxScroll)

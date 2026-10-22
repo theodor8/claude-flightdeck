@@ -52,6 +52,7 @@ have no process, so they are not listed until resumed. With several open:
 | `a` | follow the most recently active session again |
 | `1`–`6` | expand an agent card or lane |
 | `f` `s` `o` | the gate's file / shell / other drill-down |
+| `↑` `↓`, `pgup` `pgdn`, `home` `end` | scroll the panels when they are taller than the window |
 | `q` | quit |
 
 The bottom line lists the keys that do something right now: `1`–`6` only when there are agent cards to expand,
@@ -77,6 +78,13 @@ here (connectors are drawn still, clocks redraw once a second).
   ```
 
   `ghostty +show-face --string='▰▱▮▯◐↻'` shows which font draws each one.
+- **Layout** follows the window's width, not the `layout` option or `/flightdeck layout`. Under 110 columns the
+  panels are one column, as upstream draws them. From 110 they sit side by side (main, architect and gate; agents,
+  loops and the last turn), each group drawn by upstream at its column's width, with the session log under them
+  filling the rows left. From 170 the log is a third column as tall as the window. The viewer draws the log itself
+  for this, in upstream's style, since upstream keeps it to 8 lines; the store holds the last 60.
+- **No title.** The `FLIGHTDECK · <MODEL>` line and its legend are left out; the session lines name the session.
+- **Scrolling.** Panels taller than the window scroll under the session lines, which stay put.
 - **Connectors and clocks** are drawn still and redraw once a second (the pane's animated rails need Claude Code).
 - **Hotkeys** are plain keys in the window, not `ctrl+x tab` focus.
 - **Top row.** Ink enters the alternate screen without homing the cursor; the viewer homes it so the frame starts on
