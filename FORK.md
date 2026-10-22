@@ -52,6 +52,16 @@ The panels and options are upstream's, described in the [README](README.md#what-
 each session's snapshot, so a change in `/config` reaches the viewer after `/reload-plugins`; `motion` has no effect
 here (connectors are drawn still, clocks redraw once a second).
 
+## How the viewer's drawing differs from the pane
+
+- **Gauges.** The gauges' `▰▱` and the effort bar's `▮▯` are drawn as `█░`. Many monospace fonts lack them (JetBrains
+  Mono, Ghostty's default, does), and the fallback fonts that have them (Hack Nerd Font, Menlo) fill the whole cell, so
+  the segments run together and into the percentage. The swap is `GLYPHS` in `viewer/src/theme.ts`.
+- **Connectors and clocks** are drawn still and redraw once a second (the pane's animated rails need Claude Code).
+- **Hotkeys** are plain keys in the window, not `ctrl+x tab` focus.
+- **Top row.** Ink enters the alternate screen without homing the cursor; the viewer homes it so the frame starts on
+  the window's top row.
+
 ## Updating from upstream
 
 ```sh
