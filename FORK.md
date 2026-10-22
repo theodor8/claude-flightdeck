@@ -46,7 +46,11 @@ open:
 | `f` `s` `o` | the gate's file / shell / other drill-down |
 | `q` | quit |
 
-`flightdeck --once` prints a single frame and exits. Colours are in `viewer/src/theme.ts`.
+The bottom line lists the keys that do something right now: `1`–`6` only when there are agent cards to expand,
+`f s o` only when the gate panel is shown.
+
+`flightdeck --once` prints a single frame and exits. Colours are in `viewer/src/theme.ts`. Errors are logged in
+`~/.claude/flightdeck/viewer.log`; one that stops the viewer is also printed in the terminal after it closes.
 
 The panels and options are upstream's, described in the [README](README.md#what-you-see). The options are read from
 each session's snapshot, so a change in `/config` reaches the viewer after `/reload-plugins`; `motion` has no effect

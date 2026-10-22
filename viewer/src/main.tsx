@@ -1,8 +1,9 @@
 // Flightdeck in a terminal window of its own. It runs the mod's own `ui.render` hook from
 // `hooks/register.tsx`, unchanged, against the snapshot the bridge writes, and draws the tree it
 // answers with Ink. Upstream changes to the panels reach this window with no change here.
-import { watch } from 'node:fs'
+import { appendFileSync, watch } from 'node:fs'
 import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 
 import { Box as InkBox, Text as InkText, render, renderToString, useInput } from 'ink'
 import type { Key } from 'ink'
@@ -85,11 +86,23 @@ const header = (s: Session, now: number) => (
     <InkText color={s.isLive ? 'green' : 'gray'}>{s.isLive ? '● live' : `○ ended ${ago(now - s.snap.updatedAt)} ago`}</InkText>
     <InkText bold>{`  ${tilde(s.snap.cwd)}`}</InkText>
     <InkText dimColor>{`  ${s.id.slice(0, 8)}`}</InkText>
-    {sessions.length > 1 ? (
-      <InkText dimColor>{`  ${sessions.indexOf(s) + 1}/${sessions.length} · tab ${pinned ? '· a follow' : '(following)'}`}</InkText>
-    ) : null}
+    {sessions.length > 1 ? <InkText dimColor>{`  ${sessions.indexOf(s) + 1}/${sessions.length}${pinned ? ' · pinned' : ''}`}</InkText> : null}
   </InkText>
 )
+
+/** The keys that do something in this frame: a key that would do nothing is not offered. */
+const footer = () => {
+  const digits = [...hotkeys.keys()].filter(k => /^\d$/.test(k)).sort()
+  const gate = ['f', 's', 'o'].filter(k => hotkeys.has(k))
+  const parts = [
+    digits.length > 1 ? `${digits[0]}-${digits[digits.length - 1]} agent` : digits.length === 1 ? '1 agent' : null,
+    gate.length > 0 ? `${gate.join(' ')} gate` : null,
+    sessions.length > 1 ? 'tab session' : null,
+    pinned ? 'a follow latest' : null,
+    'q quit',
+  ]
+  return <InkText dimColor wrap="truncate">{parts.filter(Boolean).join(' · ')}</InkText>
+}
 
 async function frame(): Promise<ReactNode> {
   const now = Date.now()
@@ -117,8 +130,8 @@ async function frame(): Promise<ReactNode> {
   }
   const e = {
     surface: 'terminal',
-    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows: rows - 1 }, view: null },
-    viewport: { rows: rows - 1, columns },
+    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows: rows - 2 }, view: null },
+    viewport: { rows: rows - 2, columns },
   }
   const tree = draw ? await draw($, e) : null
   hotkeys = hotkeysOf(tree)
@@ -126,6 +139,7 @@ async function frame(): Promise<ReactNode> {
     <InkBox flexDirection="column">
       {header(s, now)}
       {tree}
+      {footer()}
     </InkBox>
   )
 }
@@ -174,7 +188,8 @@ async function refresh() {
   try {
     app.rerender(<Root body={await frame()} />)
   } catch (err) {
-    app.rerender(<Root body={<InkText color="red">{`flightdeck viewer: ${(err as Error).message}`}</InkText>} />)
+    note(err)
+    app.rerender(<Root body={<InkText color="red">{`flightdeck viewer: ${(err as Error).message} (${tilde(LOG)})`}</InkText>} />)
   } finally {
     isDrawing = false
     if (isDirty) {
@@ -188,6 +203,31 @@ function quit() {
   app.unmount()
   process.exit(0)
 }
+
+// Errors go to a log, since the alternate screen drops whatever is printed while it closes; one
+// that would end the process is printed again once the shell's screen is back.
+const LOG = join(dirname(DIR), 'viewer.log')
+const textOf = (err: unknown) => (err instanceof Error ? (err.stack ?? err.message) : String(err))
+
+function note(err: unknown) {
+  try {
+    appendFileSync(LOG, `${new Date().toISOString()} ${textOf(err)}\n`)
+  } catch {
+    // Nowhere to note it; the frame still says what went wrong.
+  }
+}
+
+function crash(err: unknown) {
+  note(err)
+  try {
+    app.unmount()
+  } finally {
+    process.stderr.write(`flightdeck viewer stopped: ${textOf(err)}\n(logged in ${tilde(LOG)})\n`)
+    process.exit(1)
+  }
+}
+process.on('uncaughtException', crash)
+process.on('unhandledRejection', crash)
 
 let pending: NodeJS.Timeout | null = null
 listSessions(Date.now())
