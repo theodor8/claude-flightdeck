@@ -13,7 +13,7 @@ import { register } from '../../hooks/register'
 import type { ViewerState } from './claude-code-shim'
 import { DIR, listSessions } from './sessions'
 import type { Session, Snapshot } from './sessions'
-import { DIMMED, paint } from './theme'
+import { DIMMED, glyphs, paint } from './theme'
 
 declare global {
   // The JSX factory the mod's drawing compiles against.
@@ -25,8 +25,10 @@ globalThis.h = React.createElement
 
 type Props = Record<string, unknown> & { children?: ReactNode }
 
-const Text = ({ color, dimColor, ...p }: Props) => (
-  <InkText {...p} color={paint(color as string | undefined)} dimColor={Boolean(dimColor) || DIMMED.has(color as string)} />
+const Text = ({ color, dimColor, children, ...p }: Props) => (
+  <InkText {...p} color={paint(color as string | undefined)} dimColor={Boolean(dimColor) || DIMMED.has(color as string)}>
+    {React.Children.map(children, c => (typeof c === 'string' ? glyphs(c) : c))}
+  </InkText>
 )
 
 const Box = ({ borderColor, ...p }: Props) => <InkBox {...p} borderColor={paint(borderColor as string | undefined)} />
@@ -159,6 +161,9 @@ if (process.argv.includes('--once')) {
 }
 
 const app = render(<Root body={null} />, { alternateScreen: true, incrementalRendering: true, patchConsole: false })
+// Entering the alternate screen keeps the cursor where the shell's prompt left it, and Ink draws
+// from there: home it so the window starts on its top row.
+process.stdout.write('\u001B[H')
 
 let isDrawing = false
 let isDirty = false
