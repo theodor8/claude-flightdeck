@@ -10,10 +10,11 @@ import type { Key } from 'ink'
 import React from 'react'
 import type { ReactNode } from 'react'
 
+import { fmtUsd, shorten } from '../../hooks/core'
 import { register } from '../../hooks/register'
 import type { ViewerState } from './claude-code-shim'
 import { DIR, listSessions } from './sessions'
-import type { Session, Snapshot } from './sessions'
+import type { Session, Snapshot, Status } from './sessions'
 import { DIMMED, paint } from './theme'
 
 declare global {
@@ -73,6 +74,8 @@ const local: Record<string, unknown> = {}
 let pinned: string | null = null
 let sessions: Session[] = []
 let hotkeys = new Map<string, () => unknown>()
+/** The session drawn last, so the window's own toggles reset when another takes its place. */
+let shownId: string | null = null
 
 const tilde = (p: string) => (p.startsWith(homedir()) ? `~${p.slice(homedir().length)}` : p)
 
@@ -81,14 +84,35 @@ const ago = (ms: number) => {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`
 }
 
-const header = (s: Session, now: number) => (
-  <InkText wrap="truncate">
-    <InkText color={s.isLive ? 'green' : 'gray'}>{s.isLive ? '● live' : `○ ended ${ago(now - s.snap.updatedAt)} ago`}</InkText>
-    <InkText bold>{`  ${tilde(s.snap.cwd)}`}</InkText>
-    <InkText dimColor>{`  ${s.id.slice(0, 8)}`}</InkText>
-    {sessions.length > 1 ? <InkText dimColor>{`  ${sessions.indexOf(s) + 1}/${sessions.length}${pinned ? ' · pinned' : ''}`}</InkText> : null}
-  </InkText>
-)
+const STATUS: Record<Status['kind'], { glyph: string; label: string; color: string }> = {
+  'needs-you': { glyph: '◆', label: 'needs you', color: 'yellowBright' },
+  working: { glyph: '●', label: 'working', color: 'green' },
+  done: { glyph: '✓', label: 'done', color: 'blue' },
+  idle: { glyph: '○', label: 'idle', color: 'gray' },
+}
+
+/** One line per live session (and the shown one, live or not): ▶ marks the one drawn below. */
+const strip = (shown: Session, now: number) => {
+  const listed = sessions.filter(x => x.isLive || x === shown)
+  const names = listed.map(x => tilde(x.snap.cwd))
+  const w = Math.min(28, Math.max(...names.map(n => n.length)))
+  return listed.map((x, i) => {
+    const isShown = x === shown
+    const st = x.isLive ? STATUS[x.status.kind] : { glyph: '○', label: `ended ${ago(now - x.snap.updatedAt)} ago`, color: 'gray' }
+    const when = x.isLive && x.status.kind === 'done' && x.status.since ? ` ${ago(now - x.status.since)} ago` : ''
+    return (
+      <InkText key={x.id} wrap="truncate">
+        <InkText bold={isShown}>{`${isShown ? '▶' : ' '} ${shorten(names[i] ?? '', w).padEnd(w)}`}</InkText>
+        <InkText dimColor>{` ${x.id.slice(0, 4)}  `}</InkText>
+        <InkText color={st.color} bold={x.status.kind === 'needs-you'}>{`${st.glyph} ${st.label}${when}`.padEnd(15)}</InkText>
+        {x.ctxPct !== null ? <InkText dimColor>{`  ctx ${String(Math.round(x.ctxPct)).padStart(2)}%`}</InkText> : null}
+        {x.costUsd !== null ? <InkText dimColor>{`  ${fmtUsd(x.costUsd).padStart(6)}`}</InkText> : null}
+        {x.agentsRunning > 0 ? <InkText color={paint('suggestion')}>{`  ${x.agentsRunning} agent${x.agentsRunning === 1 ? '' : 's'}`}</InkText> : null}
+        {x.isLive && x.status.kind === 'needs-you' ? <InkText color="yellowBright">{`  ${x.status.detail}`}</InkText> : null}
+      </InkText>
+    )
+  })
+}
 
 /** The keys that do something in this frame: a key that would do nothing is not offered. */
 const footer = () => {
@@ -107,7 +131,9 @@ const footer = () => {
 async function frame(): Promise<ReactNode> {
   const now = Date.now()
   sessions = listSessions(now)
-  const s = sessions.find(x => x.id === pinned) ?? sessions[0]
+  // Following, a session waiting on the person comes first: the latest to start waiting.
+  const waiting = sessions.filter(x => x.isLive && x.status.kind === 'needs-you').sort((a, b) => (b.status.since ?? 0) - (a.status.since ?? 0))
+  const s = sessions.find(x => x.id === pinned) ?? waiting[0] ?? sessions[0]
   const columns = process.stdout.columns || Number(process.env.COLUMNS) || 80
   const rows = process.stdout.rows || Number(process.env.LINES) || 40
   if (!s) {
@@ -115,6 +141,11 @@ async function frame(): Promise<ReactNode> {
     return <InkText dimColor>{`Waiting for a Claude Code session with the flightdeck mod… (${tilde(DIR)})`}</InkText>
   }
   if (pinned && s.id !== pinned) pinned = null
+  if (s.id !== shownId) {
+    for (const k of Object.keys(local)) delete local[k]
+    shownId = s.id
+  }
+  const lines = strip(s, now)
   loadDraw(s.snap.options)
   const snap: Snapshot = s.snap
   const $: ViewerState & Record<string, unknown> = {
@@ -130,14 +161,14 @@ async function frame(): Promise<ReactNode> {
   }
   const e = {
     surface: 'terminal',
-    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows: rows - 2 }, view: null },
-    viewport: { rows: rows - 2, columns },
+    props: { bodyColumns: columns - 1, placement: 'docked', scroll: { bodyRows: rows - lines.length - 1 }, view: null },
+    viewport: { rows: rows - lines.length - 1, columns },
   }
   const tree = draw ? await draw($, e) : null
   hotkeys = hotkeysOf(tree)
   return (
     <InkBox flexDirection="column">
-      {header(s, now)}
+      {lines}
       {tree}
       {footer()}
     </InkBox>
@@ -151,7 +182,6 @@ const onKey = (input: string, key: Key) => {
   if (key.tab && sessions.length > 0) {
     const at = sessions.findIndex(x => x.id === (pinned ?? sessions[0]?.id))
     pinned = sessions[(at + 1) % sessions.length]?.id ?? null
-    for (const k of Object.keys(local)) delete local[k]
     return void refresh()
   }
   if (input === 'a') {

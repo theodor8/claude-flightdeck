@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { HEARTBEAT_MS, SNAPSHOT_DIR } from '../../hooks/bridge'
+import type { AgentCard, Check, Main, Receipt, Turn, Usage } from '../../types'
 
 export const DIR = join(homedir(), SNAPSHOT_DIR)
 /** A session whose snapshot is older than this has ended (or its process is gone). */
@@ -23,7 +24,41 @@ export type Snapshot = {
   state: Record<string, unknown>
 }
 
-export type Session = { id: string; snap: Snapshot; isLive: boolean; activeAt: number }
+/**
+ * What a session is doing, for the strip: `needs-you` while a permission check waits on the person,
+ * `working` while a turn runs, `done` once one has finished, `idle` before any.
+ */
+export type Status = { kind: 'needs-you' | 'working' | 'done' | 'idle'; detail: string; since: number | null }
+
+export type Session = {
+  id: string
+  snap: Snapshot
+  isLive: boolean
+  activeAt: number
+  status: Status
+  ctxPct: number | null
+  costUsd: number | null
+  agentsRunning: number
+}
+
+/**
+ * A pending check counts as waiting on the person only once it has waited this long: in auto mode
+ * every check is pending while the classifier decides, which takes a moment, and a person's answer
+ * takes longer.
+ */
+const NEEDS_YOU_AFTER_MS = 5000
+
+const statusOf = (s: Snapshot, now: number): Status => {
+  const main = (s.state.main ?? {}) as Partial<Main>
+  const turn = (s.state.turn ?? {}) as Partial<Turn>
+  const receipt = s.state.receipt as Receipt | null | undefined
+  const recent = ((s.state.gate as { recent?: Check[] } | undefined)?.recent ?? []).filter(c => c.verdict === 'ask')
+  const pending = recent[recent.length - 1]
+  if (pending && now - pending.at >= NEEDS_YOU_AFTER_MS) return { kind: 'needs-you', detail: pending.detail, since: pending.at }
+  if (main.isRunning) return { kind: 'working', detail: '', since: turn.startedAt || null }
+  if (receipt && turn.startedAt) return { kind: 'done', detail: '', since: turn.startedAt + receipt.durationMs }
+  return { kind: 'idle', detail: '', since: null }
+}
 
 const parse = (file: string): Snapshot | null => {
   try {
@@ -57,7 +92,19 @@ export function listSessions(now: number): Session[] {
     if (age > LIST_MS) continue
     const snap = parse(file)
     // Older bridges wrote pre-warmed spare sessions too; those files have no `turns`.
-    if (snap && (snap.turns ?? 0) > 0) out.push({ id: snap.sessionId, snap, isLive: now - snap.updatedAt < LIVE_MS, activeAt: activityOf(snap) })
+    if (!snap || (snap.turns ?? 0) === 0) continue
+    const usage = (snap.state.usage ?? {}) as Partial<Usage>
+    const agents = (snap.state.agents ?? []) as AgentCard[]
+    out.push({
+      id: snap.sessionId,
+      snap,
+      isLive: now - snap.updatedAt < LIVE_MS,
+      activeAt: activityOf(snap),
+      status: statusOf(snap, now),
+      ctxPct: usage.pct ?? null,
+      costUsd: usage.costUsd ?? null,
+      agentsRunning: agents.filter(a => a.status === 'running').length,
+    })
   }
   return out.sort((a, b) => Number(b.isLive) - Number(a.isLive) || b.activeAt - a.activeAt)
 }

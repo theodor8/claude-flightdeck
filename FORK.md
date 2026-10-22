@@ -34,9 +34,12 @@ already running when the plugin was installed loads it the same way; it only see
 
 ## Use
 
-Open a terminal window and run `flightdeck`. It follows the Claude Code session you last used; a session shows up after
-its first prompt (a resumed one at once). The top line says whether it is live, its folder and its id. With several
-open:
+Open a terminal window and run `flightdeck`. A session shows up after its first prompt (a resumed one at once).
+
+The top lines list every live session, one each: folder, short id, status, context, cost and running agents; `▶`
+marks the one drawn below. Status is `◆ needs you` (a permission check has waited on you for 5s or more; the check is
+shown), `● working`, `✓ done 2m ago` or `○ idle`. The viewer follows the session that needs you, else the one you
+last used. With several open:
 
 | Key | Does |
 | --- | --- |
