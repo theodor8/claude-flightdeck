@@ -9,7 +9,7 @@ ANSI colours, so it follows the terminal theme.
 
 | Part | What it does |
 | --- | --- |
-| `hooks/bridge.ts` | Mirrors Flightdeck's session state to `~/.claude/flightdeck/sessions/<session>.json` on every change, and every 5s as a heartbeat. |
+| `hooks/bridge.ts` | Mirrors Flightdeck's session state to `~/.claude/flightdeck/sessions/<session>.json` on every change, and every 5s as a heartbeat. A session with no prompt yet (such as a pre-warmed `claude agents` spare) writes nothing. |
 | `hooks/main.ts` | The hooks module: upstream's `register`, untouched, plus the bridge. `hooks/hooks.json` points here. |
 | `viewer/` | The `flightdeck` command: runs upstream's own Pane drawing from `hooks/register.tsx` against the snapshot and draws it with [Ink](https://github.com/vadimdemedes/ink). |
 
@@ -24,14 +24,19 @@ ln -s ~/dev/claude-flightdeck/viewer/bin/flightdeck.mjs ~/.local/bin/flightdeck
 
 claude plugin marketplace add ~/dev/claude-flightdeck
 claude plugin install flightdeck@claude-flightdeck --scope user
-echo '{"openOnStart":"false"}' | claude plugin configure flightdeck@claude-flightdeck --values-stdin
+echo '{"openOnStart":"false","statusLine":"false"}' | claude plugin configure flightdeck@claude-flightdeck --values-stdin
 ```
 
-The plugin is read from this folder, so an edit or a pull reaches Claude Code with `/reload-plugins`.
+`openOnStart` and `statusLine` off: no pane inside Claude Code and no entry on its status bar; the viewer needs neither.
+
+The plugin is read from this folder, so an edit or a pull reaches Claude Code with `/reload-plugins`. A session that was
+already running when the plugin was installed loads it the same way; it only sees events from then on.
 
 ## Use
 
-Open a terminal window and run `flightdeck`. It follows the Claude Code session you last used; with several open:
+Open a terminal window and run `flightdeck`. It follows the Claude Code session you last used; a session shows up after
+its first prompt (a resumed one at once). The top line says whether it is live, its folder and its id. With several
+open:
 
 | Key | Does |
 | --- | --- |
@@ -42,6 +47,10 @@ Open a terminal window and run `flightdeck`. It follows the Claude Code session 
 | `q` | quit |
 
 `flightdeck --once` prints a single frame and exits. Colours are in `viewer/src/theme.ts`.
+
+The panels and options are upstream's, described in the [README](README.md#what-you-see). The options are read from
+each session's snapshot, so a change in `/config` reaches the viewer after `/reload-plugins`; `motion` has no effect
+here (connectors are drawn still, clocks redraw once a second).
 
 ## Updating from upstream
 
