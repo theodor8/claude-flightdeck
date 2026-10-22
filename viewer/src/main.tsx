@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import { shorten } from '../../hooks/core'
 import { register } from '../../hooks/register'
 import type { ViewerState } from './claude-code-shim'
+import { NAMES_EVERY_MS, nameOf, readNames } from './names'
 import { DIR, listSessions } from './sessions'
 import type { Session, Snapshot, Status } from './sessions'
 import { DIMMED, paint } from './theme'
@@ -97,16 +98,19 @@ const listed = () => (sessions.some(x => x.isLive) ? sessions.filter(x => x.isLi
 /** One line per live session (and the shown one, live or not), ▶ on the one drawn below, then a gap. */
 const strip = (shown: Session, now: number) => {
   const listed = sessions.filter(x => x.isLive || x === shown)
-  const names = listed.map(x => tilde(x.snap.cwd))
-  const w = Math.min(28, Math.max(...names.map(n => n.length)))
+  // The name from `claude agents`, or the short id for a session it does not name.
+  const labels = listed.map(x => nameOf(x.id) ?? x.id.slice(0, 8))
+  const folders = listed.map(x => tilde(x.snap.cwd))
+  const lw = Math.min(24, Math.max(...labels.map(n => n.length)))
+  const fw = Math.min(28, Math.max(...folders.map(n => n.length)))
   return listed.map((x, i) => {
     const isShown = x === shown
     const st = x.isLive ? STATUS[x.status.kind] : { glyph: '○', label: `ended ${ago(now - x.snap.updatedAt)} ago`, color: 'gray' }
     const when = x.isLive && x.status.kind === 'done' && x.status.since ? ` ${ago(now - x.status.since)} ago` : ''
     return (
       <InkText key={x.id} wrap="truncate">
-        <InkText bold={isShown}>{`${isShown ? '▶' : ' '} ${shorten(names[i] ?? '', w).padEnd(w)}`}</InkText>
-        <InkText dimColor>{` ${x.id.slice(0, 4)}  `}</InkText>
+        <InkText bold={isShown} dimColor={!nameOf(x.id)}>{`${isShown ? '▶' : ' '} ${shorten(labels[i] ?? '', lw).padEnd(lw)}`}</InkText>
+        <InkText dimColor>{`  ${shorten(folders[i] ?? '', fw).padEnd(fw)}  `}</InkText>
         <InkText color={st.color} bold={x.status.kind === 'needs-you'}>{`${st.glyph} ${st.label}${when}`.padEnd(15)}</InkText>
         {x.ctxPct !== null ? <InkText dimColor>{`  ctx ${String(Math.round(x.ctxPct)).padStart(2)}%`}</InkText> : null}
         {x.agentsRunning > 0 ? <InkText color={paint('suggestion')}>{`  ${x.agentsRunning} agent${x.agentsRunning === 1 ? '' : 's'}`}</InkText> : null}
@@ -203,6 +207,7 @@ const Root = ({ body }: { body: ReactNode }) => {
 
 // `--once` prints one frame and exits: for a look without a window, or a script.
 if (process.argv.includes('--once')) {
+  await readNames(() => undefined)
   process.stdout.write(`${renderToString(<InkBox flexDirection="column">{await frame()}</InkBox>, { columns: process.stdout.columns || Number(process.env.COLUMNS) || 80 })}\n`)
   process.exit(0)
 }
@@ -272,6 +277,8 @@ watch(DIR, () => {
     void refresh()
   }, 50)
 })
+void readNames(() => void refresh())
+setInterval(() => void readNames(() => void refresh()), NAMES_EVERY_MS)
 // The clocks on the cards and the turn tick once a second.
 setInterval(() => void refresh(), 1000)
 process.stdout.on('resize', () => void refresh())
