@@ -166,12 +166,22 @@ const STATUS: Record<Status['kind'], { glyph: string; label: string; color: stri
   idle: { glyph: '○', label: 'idle', color: 'gray' },
 }
 
-/** The sessions tab moves through: the live ones, or every one when none is live. */
-const listed = () => (sessions.some(x => x.isLive) ? sessions.filter(x => x.isLive) : sessions)
+/**
+ * A live session that has done something since its process started. An idle one has not: Claude Code
+ * restarted it (a reply, an attach, an update) and nobody has prompted it since, or it was reset.
+ */
+const isActive = (x: Session) => x.isLive && x.status.kind !== 'idle'
 
-/** One line per live session (and the shown one, live or not), ▶ on the one drawn below, then a gap. */
+/** The sessions tab moves through: the active ones, else the live ones, else every one. */
+const listed = () => {
+  const active = sessions.filter(isActive)
+  const live = sessions.filter(x => x.isLive)
+  return active.length > 0 ? active : live.length > 0 ? live : sessions
+}
+
+/** One line per active session (and the shown one, whatever it is), ▶ on the one drawn below, then a gap. */
 const strip = (shown: Session, now: number, columns: number) => {
-  const listed = sessions.filter(x => x.isLive || x === shown)
+  const listed = sessions.filter(x => isActive(x) || x === shown)
   // The name from `claude agents`, or the short id for a session it does not name.
   const labels = listed.map(x => nameOf(x.id) ?? x.id.slice(0, 8))
   const folders = listed.map(x => tilde(x.snap.cwd))
@@ -216,7 +226,7 @@ async function frame(): Promise<ReactNode> {
   sessions = listSessions(now)
   // Following, a session waiting on the person comes first: the latest to start waiting.
   const waiting = sessions.filter(x => x.isLive && x.status.kind === 'needs-you').sort((a, b) => (b.status.since ?? 0) - (a.status.since ?? 0))
-  const s = sessions.find(x => x.id === pinned) ?? waiting[0] ?? sessions[0]
+  const s = sessions.find(x => x.id === pinned) ?? waiting[0] ?? sessions.find(isActive) ?? sessions[0]
   const columns = process.stdout.columns || Number(process.env.COLUMNS) || 80
   const rows = process.stdout.rows || Number(process.env.LINES) || 40
   if (!s) {

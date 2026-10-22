@@ -36,11 +36,13 @@ already running when the plugin was installed loads it the same way; it only see
 
 Open a terminal window and run `flightdeck`. A session shows up after its first prompt (a resumed one at once).
 
-The top lines list every live session, one each: its name in `claude agents` (or its short id when it has none),
-folder, status, context and running agents; `▶` marks the one drawn below. Names are read with
+The top lines list every live session that is not idle, one each: its name in `claude agents` (or its short id when it
+has none), folder, status, context and running agents; `▶` marks the one drawn below. Names are read with
 `claude agents --json` every 10s. Status is `◆ needs you` (a permission check has waited on you for 5s or more; the check is
-shown), `● working`, `✓ done 2m ago` or `○ idle`. The viewer follows the session that needs you, else the one you
-last used.
+shown), `● working` or `✓ done 2m ago`. A session is `○ idle` when it has not finished a turn since its process started
+(Claude Code restarts a background session's process when you attach or reply after it was stopped, and `/clear` or
+`/flightdeck reset` empties it too); it gets its line back with its next prompt, and is listed only while it is the one
+drawn or every live session is idle. The viewer follows the session that needs you, else the one you last used.
 
 A session is listed when its process runs the mod (started after the plugin was installed, or `/reload-plugins` since)
 and has had a prompt; it is live while its snapshot is fresh (rewritten every 5s). Finished `claude agents` sessions
