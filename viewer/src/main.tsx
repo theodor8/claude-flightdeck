@@ -91,6 +91,9 @@ const STATUS: Record<Status['kind'], { glyph: string; label: string; color: stri
   idle: { glyph: '○', label: 'idle', color: 'gray' },
 }
 
+/** The sessions tab moves through: the live ones, or every one when none is live. */
+const listed = () => (sessions.some(x => x.isLive) ? sessions.filter(x => x.isLive) : sessions)
+
 /** One line per live session (and the shown one, live or not), ▶ on the one drawn below, then a gap. */
 const strip = (shown: Session, now: number) => {
   const listed = sessions.filter(x => x.isLive || x === shown)
@@ -120,7 +123,7 @@ const footer = () => {
   const parts = [
     digits.length > 1 ? `${digits[0]}-${digits[digits.length - 1]} agent` : digits.length === 1 ? '1 agent' : null,
     gate.length > 0 ? `${gate.join(' ')} gate` : null,
-    sessions.length > 1 ? 'tab ⇧tab session' : null,
+    listed().length > 1 ? 'tab ⇧tab session' : null,
     pinned ? 'a follow latest' : null,
     'q quit',
   ]
@@ -178,11 +181,12 @@ async function frame(): Promise<ReactNode> {
 
 const onKey = (input: string, key: Key) => {
   if (input === 'q') return quit()
-  if (key.tab && sessions.length > 0) {
-    // tab goes down the list, shift+tab up.
-    const at = sessions.findIndex(x => x.id === (shownId ?? sessions[0]?.id))
-    const step = key.shift ? sessions.length - 1 : 1
-    pinned = sessions[(at + step) % sessions.length]?.id ?? null
+  const ring = listed()
+  if (key.tab && ring.length > 0) {
+    // tab goes down the list, shift+tab up; ended sessions are not in it.
+    const at = Math.max(0, ring.findIndex(x => x.id === shownId))
+    const step = key.shift ? ring.length - 1 : 1
+    pinned = ring[(at + step) % ring.length]?.id ?? null
     return void refresh()
   }
   if (input === 'a') {
