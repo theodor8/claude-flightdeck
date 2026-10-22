@@ -19,7 +19,7 @@ let isPending = false
 let heartbeat: { cancel: () => void } | null = null
 
 async function snapshotOf($: EngineInterface) {
-  const [id, cwd, now] = await Promise.all([$.session.id(), $.session.cwd(), $.clock.now()])
+  const [id, cwd, turns, now] = await Promise.all([$.session.id(), $.session.cwd(), $.session.turns(), $.clock.now()])
   // `plugin` and `key` must be literals for the engine, so each value is read by name.
   const [meta, main, usage, architect, gate, agents, loops, log, turn, receipt, view, roster] = await Promise.all([
     $.state.get({ plugin: 'flightdeck', key: 'meta' }),
@@ -39,6 +39,7 @@ async function snapshotOf($: EngineInterface) {
     version: SNAPSHOT_VERSION,
     sessionId: id,
     cwd,
+    turns,
     updatedAt: now,
     options,
     state: {
@@ -63,6 +64,9 @@ async function flush($: EngineInterface) {
   const home = await $.env.get('HOME')
   if (!home) return
   const snap = await snapshotOf($)
+  // A session nobody has prompted yet writes nothing: `claude agents` keeps pre-warmed spare sessions
+  // that load the mod too, and the viewer should list only the sessions in use.
+  if (snap.turns === 0) return
   await $.fs.write(`${home}/${SNAPSHOT_DIR}/${snap.sessionId}.json`, JSON.stringify(snap))
 }
 

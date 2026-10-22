@@ -16,6 +16,8 @@ export type Snapshot = {
   version: number
   sessionId: string
   cwd: string
+  /** Prompts sent in the session; absent from snapshots written before it was kept. */
+  turns?: number
   updatedAt: number
   options: Record<string, unknown>
   state: Record<string, unknown>
@@ -54,7 +56,8 @@ export function listSessions(now: number): Session[] {
     }
     if (age > LIST_MS) continue
     const snap = parse(file)
-    if (snap) out.push({ id: snap.sessionId, snap, isLive: now - snap.updatedAt < LIVE_MS, activeAt: activityOf(snap) })
+    // Older bridges wrote pre-warmed spare sessions too; those files have no `turns`.
+    if (snap && (snap.turns ?? 0) > 0) out.push({ id: snap.sessionId, snap, isLive: now - snap.updatedAt < LIVE_MS, activeAt: activityOf(snap) })
   }
   return out.sort((a, b) => Number(b.isLive) - Number(a.isLive) || b.activeAt - a.activeAt)
 }
