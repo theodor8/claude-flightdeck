@@ -175,11 +175,10 @@ const STATUS: Record<Status['kind'], { glyph: string; label: string; color: stri
  */
 const isActive = (x: Session) => x.isLive && x.status.kind !== 'idle'
 
-/** The sessions tab moves through: the active ones, else the live ones, else every one. */
+/** The sessions tab moves through: the active ones, else the live ones; never an ended one. */
 const listed = () => {
   const active = sessions.filter(isActive)
-  const live = sessions.filter(x => x.isLive)
-  return active.length > 0 ? active : live.length > 0 ? live : sessions
+  return active.length > 0 ? active : sessions.filter(x => x.isLive)
 }
 
 /** One line per active session (and the shown one, whatever it is), ▶ on the one drawn below, then a gap. */
