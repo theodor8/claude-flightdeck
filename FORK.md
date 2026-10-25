@@ -10,14 +10,24 @@ ANSI colours, so it follows the terminal theme.
 | Part | What it does |
 | --- | --- |
 | `hooks/bridge.ts` | Mirrors Flightdeck's session state to `~/.claude/flightdeck/sessions/<session>.json` on every change, and every 5s as a heartbeat, with the question or plan waiting on you, if any. A session that ends is rewritten as ended. A session with no prompt yet (such as a pre-warmed `claude agents` spare) writes nothing. |
-| `hooks/main.ts` | The hooks module: upstream's `register`, untouched, plus the bridge. `hooks/hooks.json` points here. |
+| `hooks/main.ts` | The hooks module: upstream's `register` plus the bridge. `hooks/hooks.json` points here. |
 | `viewer/` | The `flightdeck` command: runs upstream's own Pane drawing from `hooks/register.tsx` against the snapshot and draws it with [Ink](https://github.com/vadimdemedes/ink). |
 | `tests/bridge.test.ts` | The bridge's tests, run with upstream's by `claude plugin test .`. |
 
-Upstream files are not edited (only `hooks/hooks.json`'s one line), so upstream updates merge cleanly and their panel
-changes show up in the viewer as they are.
+### Changes to upstream's files
+
+Everything else is in files of the fork's own, so upstream's panel changes show up in the viewer as they are, and a
+merge from upstream conflicts only where it touches these lines:
+
+| File | Change | Why |
+| --- | --- | --- |
+| `hooks/hooks.json` | the module is `./main.ts`, not `./register.tsx` | loads the bridge alongside upstream's `register` |
+| `hooks/register.tsx` | `turn.start` returns early for a subagent's turn (`e.agentId` set) | `turn.start` fires for subagent turns too, and each reset the main turn: its start, its cost, `working`. A background agent's turn after the main one had finished left the pane `working` and its `done` dated in the future. The pane has the same bug; it is upstream's to fix too. |
+| `tests/flightdeck.test.ts` | one test for that | |
 
 ## Setup
+
+Needs Node 22 or later, Claude Code 2.1.287 or later (mods), and `~/.local/bin` on your `PATH`.
 
 ```sh
 cd ~/dev/claude-flightdeck/viewer && npm install
@@ -33,26 +43,42 @@ echo '{"openOnStart":"false","statusLine":"false"}' | claude plugin configure fl
 The plugin is read from this folder, so an edit or a pull reaches Claude Code with `/reload-plugins`. A session that was
 already running when the plugin was installed loads it the same way; it only sees events from then on.
 
+To remove it: `claude plugin uninstall flightdeck@claude-flightdeck`, `rm ~/.local/bin/flightdeck`, and
+`rm -r ~/.claude/flightdeck`.
+
 ## Use
 
 Open a terminal window and run `flightdeck`. A session shows up after its first prompt (a resumed one at once).
 
-The top lines list every live session that is not idle, one each: its name in `claude agents` (or its short id when it
-has none), folder, status, context and running agents; `▶` marks the one drawn below. Names are read with
-`claude agents --json` every 10s. Status is `◆ needs you` (a question or a plan to approve waits on you, or a permission check
-has for 5s or more; the question or check is shown), `● working` or `✓ done 2m ago`. A session is `○ idle` when it has not finished a turn since its process started
-(Claude Code restarts a background session's process when you attach or reply after it was stopped, and `/clear` or
-`/flightdeck reset` empties it too); it gets its line back with its next prompt, and is listed only while it is the one
-drawn or every live session is idle. The viewer follows the session that needs you, else the one you last used.
+### Session lines
 
-A session is listed when its process runs the mod (started after the plugin was installed, or `/reload-plugins` since)
-and has had a prompt; it is live until it ends (exits, or `/clear` starts another) or its snapshot goes stale (it is
-rewritten every 5s). Finished `claude agents` sessions
-have no process, so they are not listed until resumed. With several open:
+The top lines list the live sessions, one each: its name in `claude agents` (or its short id, dimmed, when it has
+none), folder, status, context and running agents; `▶` marks the one drawn below. Names are read with
+`claude agents --json` every 10s.
+
+| Status | When |
+| --- | --- |
+| `◆ needs you` | a question or a plan to approve waits on you, or the main loop's permission check has waited 5s or more (a subagent's never counts); the question or check is shown after it |
+| `● working` | a turn is running |
+| `✓ done 2m ago` | the last turn finished |
+| `○ idle` | no turn has finished since the session's process started: Claude Code restarts a background session's process when you attach or reply after it was stopped, and `/clear` or `/flightdeck reset` empties it too |
+| `○ ended 3m ago` | the session has ended; shown only when it is the one drawn |
+
+An idle or ended session has no line unless it is the one drawn. An idle one gets its line back with its next prompt.
+
+The viewer draws the session that needs you (the latest to start waiting), else the active one you last used, else the
+most recent idle one, else the most recent ended one.
+
+A session is live when its process runs the mod (started after the plugin was installed, or `/reload-plugins` since)
+and has had a prompt. It is live until it ends (exits, or `/clear` starts another) or its snapshot has not been
+rewritten for 15s (the heartbeat is every 5s). Finished `claude agents` sessions have no process, so they are not
+listed until resumed. Ended sessions can still be drawn for a day; their snapshots are deleted after a week.
+
+### Keys
 
 | Key | Does |
 | --- | --- |
-| `tab` / `shift+tab` | next / previous session (pins it) |
+| `tab` / `shift+tab` | next / previous session (pins it): through the sessions with a line, or every live one when all are idle; never an ended one |
 | `a` | follow the most recently active session again |
 | `1`–`6` | expand an agent card or lane |
 | `f` `s` `o` | the gate's file / shell / other drill-down |
@@ -62,12 +88,25 @@ have no process, so they are not listed until resumed. With several open:
 The bottom line lists the keys that do something right now: `1`–`6` only when there are agent cards to expand,
 `f s o` only when the gate panel is shown.
 
-`flightdeck --once` prints a single frame and exits. Colours are in `viewer/src/theme.ts`. Errors are logged in
-`~/.claude/flightdeck/viewer.log`; one that stops the viewer is also printed in the terminal after it closes.
+### Panels
 
 The panels and options are upstream's, described in the [README](README.md#what-you-see). The options are read from
 each session's snapshot, so a change in `/config` reaches the viewer after `/reload-plugins`; `motion` has no effect
-here (connectors are drawn still, clocks redraw once a second).
+here.
+
+In the session log, a row is red for an error: a tool call that failed (`✗`), one refused by a hook (`denied`) or by
+a gate rule (`denied by rule`), an agent that `stopped` or `failed`, or a request that `hit max_tokens`. Other rows
+take the colour of who wrote them.
+
+### Other
+
+`flightdeck --once` prints a single frame and exits. `flightdeck --build` (or `npm run build` in `viewer/`) only
+builds; `flightdeck` rebuilds itself on start when any source in `viewer/src`, `hooks` or `types` is newer than its
+build. Colours are in `viewer/src/theme.ts`. Errors are logged in `~/.claude/flightdeck/viewer.log`; one that stops the
+viewer is also printed in the terminal after it closes.
+
+If a session does not show up: it needs a prompt after the plugin loaded (`/reload-plugins` in a session that was
+already running), and its snapshot should be in `~/.claude/flightdeck/sessions/`.
 
 ## How the viewer's drawing differs from the pane
 
@@ -106,5 +145,5 @@ here (connectors are drawn still, clocks redraw once a second).
 git fetch upstream && git merge upstream/main
 ```
 
-then `/reload-plugins` in Claude Code. The viewer rebuilds itself on its next start when any source is newer than its
-build.
+then `/reload-plugins` in Claude Code. The viewer rebuilds itself on its next start. If the merge conflicts in
+`hooks/register.tsx`, keep upstream's version and re-add the `turn.start` guard, unless upstream has fixed it.
