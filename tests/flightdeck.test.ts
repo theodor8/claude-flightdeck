@@ -284,6 +284,19 @@ test('/clear starts the pane fresh', async ($, on) => {
   await ui.unmount()
 })
 
+test("a subagent's turn leaves the main turn as it was", async ($, on) => {
+  engine(on)
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'b1' }))
+  await $.turn.start({ text: 'fan out', turnId: 'B1' })
+  await $.agent.spawn(spawn('general-purpose', 'in the background'))
+  await $.turn.complete({ answer: '', durationMs: 10, isAborted: false, turnId: 'B1', reason: 'answer' })
+  await $.turn.start({ text: 'in the background', turnId: 'B2', agentId: 'b1' })
+  const ui = await $.ui.mount({ ...pane(86), surface: 'terminal' })
+  expect(await ui.find({ text: /○ idle/ })).toBeDefined()
+  expect(await ui.find({ text: /last turn/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('colours come from the theme by default, raw hex only when asked', async ($, on) => {
   engine(on)
   const ui = await $.ui.mount({ ...pane(64), surface: 'terminal' })

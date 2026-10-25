@@ -49,7 +49,8 @@ export type Session = {
 /**
  * A pending check counts as waiting on the person only once it has waited this long: in auto mode
  * every check is pending while the classifier decides, which takes a moment, and a person's answer
- * takes longer.
+ * takes longer. A subagent's checks never count: a check settles only when its call returns, so a
+ * fan-out of agents running long commands would read as needs you, then done, over and over.
  */
 const NEEDS_YOU_AFTER_MS = 5000
 
@@ -65,7 +66,7 @@ const statusOf = (s: Snapshot, now: number): Status => {
   const turn = (s.state.turn ?? {}) as Partial<Turn>
   const receipt = s.state.receipt as Receipt | null | undefined
   const recent = ((s.state.gate as { recent?: Check[] } | undefined)?.recent ?? []).filter(
-    c => c.verdict === 'ask' && !isPersonTool(c.tool),
+    c => c.verdict === 'ask' && !c.inSubagent && !isPersonTool(c.tool),
   )
   const pending = recent[recent.length - 1]
   if (s.waiting) return { kind: 'needs-you', detail: s.waiting.detail, since: s.waiting.since }
