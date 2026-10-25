@@ -22,8 +22,6 @@ merge from upstream conflicts only where it touches these lines:
 | File | Change | Why |
 | --- | --- | --- |
 | `hooks/hooks.json` | the module is `./main.ts`, not `./register.tsx` | loads the bridge alongside upstream's `register` |
-| `hooks/register.tsx` | `turn.start` returns early for a subagent's turn (`e.agentId` set) | `turn.start` fires for subagent turns too, and each reset the main turn: its start, its cost, `working`. A background agent's turn after the main one had finished left the pane `working` and its `done` dated in the future. The pane has the same bug; it is upstream's to fix too. |
-| `tests/flightdeck.test.ts` | one test for that | |
 
 ## Setup
 
@@ -146,4 +144,4 @@ git fetch upstream && git merge upstream/main
 ```
 
 then `/reload-plugins` in Claude Code. The viewer rebuilds itself on its next start. If the merge conflicts in
-`hooks/register.tsx`, keep upstream's version and re-add the `turn.start` guard, unless upstream has fixed it.
+`hooks/hooks.json`, keep upstream's version and point the module at `./main.ts` again.

@@ -1,6 +1,6 @@
 {
   "name": "flightdeck",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "description": "Flightdeck: a live agent dashboard for Claude Code. Main model vitals, an on-call architect, every permission check, subagent cards and swimlanes, a turn receipt and a session log, all from real session events",
   "author": {
     "name": "Stephen Casella",
@@ -72,6 +72,12 @@
       "description": "Agent cards drawn side by side; more agents than this switch to swimlanes (1-6)",
       "type": "number",
       "default": 3
+    },
+    "paneColumns": {
+      "title": "Pane width",
+      "description": "Columns the pane asks for when docked beside a fullscreen transcript, 40 or more. Claude Code caps the dock at 45% of the terminal, and a width you dragged it to wins.",
+      "type": "number",
+      "default": 66
     },
     "layout": {
       "title": "Layout",

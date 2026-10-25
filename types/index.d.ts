@@ -11,15 +11,22 @@ export type Main = {
   mode: string
   steps: number
   isRunning: boolean
-  /** The main loop's last answered request: time to its first piece of response, and output tokens
-   *  per second from that piece to the stop. Null until one is measured, absent in older state. */
-  speed?: { ttftMs: number; tokPerS: number | null } | null
+  /** The main loop's last answered request: time to its first piece of response. Null until one is
+   *  measured, absent in older state; a `tokPerS` kept by 0.5.0 and earlier is ignored. */
+  speed?: { ttftMs: number } | null
 }
 
 export type Usage = {
   pct: number | null
   tokens: number | null
   window: number
+  /** The compaction window (`autoCompactWindow`, or the host's own) the host measures context against, when auto-compaction
+   *  is on and the window is smaller than the model's; null when none is set or none could be read. */
+  compactWindow: number | null
+  /** The model window `compactWindow` was read for, so a model switch reads it again; 0 = not read yet. */
+  compactFor: number
+  /** Reads for this model window that came back with no breakdown or failed; it stops asking at 3. */
+  compactMisses: number
   costUsd: number | null
   /** `resetsAt`: when the window resets, in ms since the epoch; null when the API gave no time,
    *  absent in state saved before it was kept. */
